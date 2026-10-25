@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Miracle - Video Downloader</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <img src="../icons/icon32.png" alt="" width="20" height="20" />
+      <h1>Miracle - Video Downloader</h1>
+    </header>
+
+    <section>
+      <h2 id="page-title" class="page-title"></h2>
+      <ul id="youtube" class="list" hidden></ul>
+      <ul id="items" class="list"></ul>
+      <p id="empty" class="empty" hidden>
+        No videos detected on this page yet.<br />
+        Start playing the video, then open this menu again.
+      </p>
+    </section>
+
+    <section id="jobs-section" hidden>
+      <div class="section-head">
+        <h2>Stream downloads</h2>
+        <button id="clear-jobs" class="link">Clear finished</button>
+      </div>
+      <ul id="jobs" class="list"></ul>
+    </section>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

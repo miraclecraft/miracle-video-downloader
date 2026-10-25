@@ -1,0 +1,14 @@
+{
+  "name": "miracle-video-downloader",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "description": "Edge and Chrome extension that detects and downloads videos",
+  "scripts": {
+    "vendor": "node scripts/vendor.mjs"
+  },
+  "devDependencies": {
+    "@ffmpeg/core": "0.12.10",
+    "@ffmpeg/ffmpeg": "0.12.15"
+  }
+}

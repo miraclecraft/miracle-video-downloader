@@ -1,0 +1,46 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Merge test</title>
+<pre id="log">running…</pre>
+<script type="module">
+  // Browser smoke test for lib/dash.js + ffmpeg.wasm merging. Serve the repo root
+  // over http (e.g. `npx http-server -p 8765`) and open /test/merge-test.html.
+  import { parseMpd } from '../lib/dash.js';
+  import { sniffContainer, probeMp4 } from '../lib/mp4.js';
+  import { FFmpeg } from '../vendor/ffmpeg/index.js';
+
+  const MPD = 'https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd';
+  const out = document.getElementById('log');
+  const log = (...a) => (out.textContent += '\n' + a.join(' '));
+  const get = async (u) => new Uint8Array(await (await fetch(u)).arrayBuffer());
+  const join = (parts) => {
+    const r = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let o = 0;
+    for (const p of parts) (r.set(p, o), (o += p.length));
+    return r;
+  };
+
+  try {
+    const mpd = parseMpd(await (await fetch(MPD)).text(), MPD);
+    log('dash: video reps', mpd.video.length, 'audio reps', mpd.audio.length, 'duration', mpd.duration);
+    const v = mpd.video[mpd.video.length - 1];
+    const a = mpd.audio[0];
+    log('picked', v.id, `${v.width}x${v.height}`, 'segments', v.segments.length, '| audio', a.id, 'segments', a.segments.length);
+    const video = join([await get(v.init.url), ...(await Promise.all(v.segments.slice(0, 3).map((s) => get(s.url))))]);
+    const audio = join([await get(a.init.url), ...(await Promise.all(a.segments.slice(0, 3).map((s) => get(s.url))))]);
+    log('probe video', JSON.stringify(probeMp4(video)), '| probe audio', JSON.stringify(probeMp4(audio)));
+
+    const ff = new FFmpeg();
+    await ff.load({ coreURL: '/vendor/ffmpeg-core/ffmpeg-core.js', wasmURL: '/vendor/ffmpeg-core/ffmpeg-core.wasm' });
+    log('ffmpeg loaded');
+    await ff.writeFile('in0.mp4', video);
+    await ff.writeFile('in1.mp4', audio);
+    const code = await ff.exec(['-i', 'in0.mp4', '-i', 'in1.mp4', '-map', '0:v:0?', '-map', '1:a:0?', '-c', 'copy', '-y', 'out.mp4']);
+    const merged = await ff.readFile('out.mp4');
+    const info = probeMp4(merged);
+    log('merge exit', code, 'bytes', merged.length, 'container', sniffContainer(merged), 'tracks', JSON.stringify(info));
+    log(code === 0 && info.hasVideo && info.hasAudio ? 'RESULT: PASS' : 'RESULT: FAIL');
+  } catch (e) {
+    log('RESULT: ERROR', e.stack || e);
+  }
+</script>
