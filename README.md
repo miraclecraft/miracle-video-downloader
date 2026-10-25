@@ -1,70 +1,80 @@
-<div align="center">
+<p align="center">
+  <img src="docs/assets/logo.svg" alt="Miracle - Video Downloader logo" width="112" height="112" />
+</p>
 
-<img src="docs/assets/logo.svg" alt="Miracle - Video Downloader logo" width="120" height="120" />
+<h1 align="center">Miracle - Video Downloader</h1>
 
-# Miracle - Video Downloader
+<p align="center">
+  <b>Save the video you're watching, in one click.</b><br />
+  A free, open-source browser extension for Edge, Chrome and every Chromium browser.
+</p>
 
-**Save the video you're watching, in one click.**<br />
-A free browser extension for Edge, Chrome and every Chromium browser.
+<p align="center">
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmiraclecraft%2Fmiracle-video-downloader%2Fmain%2Fmanifest.json&query=%24.version&label=version&color=7c3aed&style=flat-square" alt="Version" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-db2777?style=flat-square" alt="License: MIT" /></a>
+  <a href="https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3"><img src="https://img.shields.io/badge/manifest-v3-f59e0b?style=flat-square" alt="Manifest V3" /></a>
+</p>
 
-[![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fmiraclecraft%2Fmiracle-video-downloader%2Fmain%2Fmanifest.json&query=%24.version&label=version&color=7c3aed)](CHANGELOG.md)
-[![License: MIT](https://img.shields.io/badge/license-MIT-db2777)](LICENSE)
-[![Manifest V3](https://img.shields.io/badge/manifest-v3-f59e0b)](https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3)
-[![GitHub stars](https://img.shields.io/github/stars/miraclecraft/miracle-video-downloader?style=flat&color=7c3aed&logo=github)](https://github.com/miraclecraft/miracle-video-downloader/stargazers)
+<p align="center">
+  <img src="https://img.shields.io/badge/Edge-0078D7?style=flat-square" alt="Microsoft Edge" />
+  <img src="https://img.shields.io/badge/Chrome-4285F4?style=flat-square" alt="Google Chrome" />
+  <img src="https://img.shields.io/badge/Brave-FB542B?style=flat-square" alt="Brave" />
+  <img src="https://img.shields.io/badge/Opera-FF1B2D?style=flat-square" alt="Opera" />
+  <img src="https://img.shields.io/badge/Vivaldi-EF3939?style=flat-square" alt="Vivaldi" />
+</p>
 
-![Microsoft Edge](https://img.shields.io/badge/Microsoft%20Edge-0078D7?logo=microsoftedge&logoColor=white)
-![Google Chrome](https://img.shields.io/badge/Google%20Chrome-4285F4?logo=googlechrome&logoColor=white)
-![Brave](https://img.shields.io/badge/Brave-FB542B?logo=brave&logoColor=white)
-![Opera](https://img.shields.io/badge/Opera-FF1B2D?logo=opera&logoColor=white)
-![Vivaldi](https://img.shields.io/badge/Vivaldi-EF3939?logo=vivaldi&logoColor=white)
-
-[**Install**](#-install) · [**How to use**](#-how-to-use) · [**Troubleshooting**](#-troubleshooting) · [**For developers**](docs/DEVELOPMENT.md)
-
-</div>
+<p align="center">
+  <a href="#install"><b>Install</b></a> &nbsp;·&nbsp;
+  <a href="#how-to-use"><b>How to use</b></a> &nbsp;·&nbsp;
+  <a href="#troubleshooting"><b>Troubleshooting</b></a> &nbsp;·&nbsp;
+  <a href="docs/DEVELOPMENT.md"><b>For developers</b></a>
+</p>
 
 ---
 
-## ✨ Features
+## Features
 
 | | |
 | --- | --- |
-| 🎬 **Works almost everywhere** | Finds videos on most websites that play them — no setup per site |
-| ▶️ **YouTube** | Pick the quality (up to 4K) or save just the audio as M4A |
-| 📘 **Facebook & Instagram** | Saves the full video **with sound**, in the quality you choose |
-| 📡 **Streaming video** | HLS and DASH streams are downloaded piece by piece and joined into one `.mp4` |
-| 🔒 **Private** | No account, no ads, no tracking — nothing is sent anywhere |
-| 🆓 **Free & open source** | MIT licensed, every line of code is right here |
+| **Works almost everywhere** | Finds videos on most websites that play them, with no per-site setup |
+| **YouTube** | Pick the quality, up to 4K, or save just the audio as M4A |
+| **Facebook & Instagram** | Saves the full video with sound, in the quality you choose |
+| **Streaming video** | HLS and DASH streams are downloaded piece by piece and joined into one `.mp4` |
+| **Private** | No account, no ads, no tracking. Nothing is sent anywhere |
+| **Free & open source** | MIT licensed, and every line of code is right here |
 
 ### Supported sites
 
-![YouTube](https://img.shields.io/badge/YouTube-FF0000?logo=youtube&logoColor=white)
-![Facebook](https://img.shields.io/badge/Facebook-0866FF?logo=facebook&logoColor=white)
-![Instagram](https://img.shields.io/badge/Instagram-E4405F?logo=instagram&logoColor=white)
-![Any site](https://img.shields.io/badge/+%20most%20other%20video%20sites-555555)
+<p>
+  <img src="https://img.shields.io/badge/YouTube-FF0000?style=flat-square&logo=youtube&logoColor=white" alt="YouTube" />
+  <img src="https://img.shields.io/badge/Facebook-0866FF?style=flat-square&logo=facebook&logoColor=white" alt="Facebook" />
+  <img src="https://img.shields.io/badge/Instagram-E4405F?style=flat-square&logo=instagram&logoColor=white" alt="Instagram" />
+  <img src="https://img.shields.io/badge/most%20other%20video%20sites-555555?style=flat-square" alt="Most other video sites" />
+</p>
 
 > [!NOTE]
 > Netflix, Prime Video, Disney+ and other services that use DRM copy protection are **not supported**, on purpose.
 
 ---
 
-## 🚀 Install
+## Install
 
 > [!TIP]
 > You only do this once, and it takes about two minutes.
 
-### 1️⃣ Download
+### 1. Download
 
 Click the green **Code** button at the top of this page → **Download ZIP**, then extract it somewhere you'll keep it, for example `Documents\MiracleVideoDownloader`.
 
 > [!IMPORTANT]
 > Don't delete or move the folder afterwards. The browser loads the extension from it.
 
-### 2️⃣ Add it to your browser
+### 2. Add it to your browser
 
 <table>
 <tr>
-<th><img src="https://img.shields.io/badge/Microsoft%20Edge-0078D7?logo=microsoftedge&logoColor=white" alt="Microsoft Edge" /></th>
-<th><img src="https://img.shields.io/badge/Google%20Chrome-4285F4?logo=googlechrome&logoColor=white" alt="Google Chrome" /></th>
+<th><img src="https://img.shields.io/badge/Microsoft%20Edge-0078D7?style=flat-square" alt="Microsoft Edge" /></th>
+<th><img src="https://img.shields.io/badge/Google%20Chrome-4285F4?style=flat-square" alt="Google Chrome" /></th>
 </tr>
 <tr>
 <td>
@@ -86,9 +96,9 @@ Click the green **Code** button at the top of this page → **Download ZIP**, th
 
 Brave, Opera and Vivaldi work the same way through their own extensions page.
 
-📌 Click the puzzle-piece icon in the toolbar and **pin** Miracle so it's always one click away.
+Then click the puzzle-piece icon in the toolbar and **pin** Miracle so it's always one click away.
 
-### 3️⃣ YouTube add-on <sub>(optional, Windows)</sub>
+### 3. YouTube add-on <sub>(optional, Windows)</sub>
 
 YouTube can't be downloaded from inside the browser, so it uses a small helper app.
 
@@ -100,11 +110,7 @@ It downloads two well-known free tools, [yt-dlp](https://github.com/yt-dlp/yt-dl
 
 ---
 
-## 🎯 How to use
-
-```
-  ▶  Play the video   →   🖱  Click the Miracle icon   →   ⬇  Pick a quality & Download
-```
+## How to use
 
 1. Open a page with a video and **start playing it**
 2. Click the **Miracle** icon. The number on it shows how many videos were found
@@ -116,7 +122,7 @@ On **YouTube** the menu shows the video's thumbnail and title. Pick a quality or
 
 ---
 
-## 🛠 Troubleshooting
+## Troubleshooting
 
 <details>
 <summary><b>"No videos detected on this page yet"</b></summary>
@@ -150,11 +156,11 @@ Every extension installed with <b>Load unpacked</b> shows that notice. It's safe
 
 ---
 
-## 🔄 Update
+## Update
 
 Download the ZIP again, replace the files in your folder, then click **Reload** on the extension in `edge://extensions` or `chrome://extensions`. If you use YouTube, run `companion\install.cmd` again too.
 
-## 🗑 Uninstall
+## Uninstall
 
 - Click **Remove** on the extension in `edge://extensions` or `chrome://extensions`
 - If you installed the YouTube add-on, double-click `companion\uninstall.cmd`
@@ -164,16 +170,17 @@ Download the ZIP again, replace the files in your folder, then click **Reload** 
 > [!WARNING]
 > **Please download responsibly.** Only save videos you have the right to keep. Many sites, YouTube included, don't allow downloading in their terms of service, and you're responsible for how you use this tool.
 
-## 👩‍💻 For developers
+## For developers
 
 How it works, the project layout and debugging tips are in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). Changes are listed in the [changelog](CHANGELOG.md).
 
-## 📄 License
+## License
 
 [MIT](LICENSE). The bundled ffmpeg.wasm core in `vendor/ffmpeg-core/` keeps its own GPL-2.0-or-later license; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-<div align="center">
 <br />
-<img src="docs/assets/logo.svg" alt="" width="32" height="32" /><br />
-<sub>Made with ✨ by <a href="https://github.com/miraclecraft">miraclecraft</a></sub>
-</div>
+
+<p align="center">
+  <img src="docs/assets/logo.svg" alt="" width="28" height="28" /><br />
+  <sub>Made by <a href="https://github.com/miraclecraft">miraclecraft</a></sub>
+</p>
