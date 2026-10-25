@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7c3aed"/>
+      <stop offset="0.55" stop-color="#db2777"/>
+      <stop offset="1" stop-color="#f59e0b"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="144" height="144" rx="36" fill="url(#bg)"/>
+  <rect x="8" y="8" width="144" height="72" rx="36" fill="url(#shine)"/>
+  <!-- play button -->
+  <path d="M62 44 L108 72 L62 100 Z" fill="#ffffff" stroke="#ffffff" stroke-width="8" stroke-linejoin="round"/>
+  <!-- download tray -->
+  <path d="M48 116 H112" stroke="#ffffff" stroke-width="10" stroke-linecap="round"/>
+  <!-- sparkle -->
+  <path d="M124 26 Q126 38 138 40 Q126 42 124 54 Q122 42 110 40 Q122 38 124 26 Z" fill="#fff7d6"/>
+  <circle cx="138" cy="60" r="4" fill="#fff7d6"/>
+</svg>
