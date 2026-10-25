@@ -2,6 +2,7 @@
   "name": "miracle-video-downloader",
   "version": "0.3.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "description": "Edge and Chrome extension that detects and downloads videos",
   "scripts": {

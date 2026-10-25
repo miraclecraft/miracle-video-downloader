@@ -100,3 +100,7 @@ Only download videos you have the right to save. Many sites, YouTube included, d
 ## For developers
 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for how it works, the project layout and how to debug it. Third-party components are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## License
+
+[MIT](LICENSE). The bundled ffmpeg.wasm core in `vendor/ffmpeg-core/` keeps its own GPL-2.0-or-later license; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
