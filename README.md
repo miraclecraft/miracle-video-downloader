@@ -1,8 +1,7 @@
-<p align="center">
-  <img src="docs/assets/logo.svg" alt="Miracle - Video Downloader logo" width="112" height="112" />
-</p>
-
-<h1 align="center">Miracle - Video Downloader</h1>
+<h1 align="center">
+  <img src="docs/assets/logo.svg" alt="Miracle logo" width="56" height="56" align="center" />
+  Miracle - Video Downloader
+</h1>
 
 <p align="center">
   <b>Save the video you're watching, in one click.</b><br />
