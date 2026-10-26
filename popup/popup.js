@@ -1,12 +1,12 @@
 import { buildEntries, formatBytes, formatDuration, formatSpeed } from '../lib/common.js';
-import { youtubeVideoUrl, COMPANION_MISSING } from '../lib/youtube.js';
+import { companionTarget, COMPANION_MISSING } from '../lib/companion.js';
 
 const $items = document.getElementById('items');
 const $empty = document.getElementById('empty');
 const $pageTitle = document.getElementById('page-title');
 const $jobs = document.getElementById('jobs');
 const $jobsSection = document.getElementById('jobs-section');
-const $youtube = document.getElementById('youtube');
+const $companion = document.getElementById('companion');
 
 const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 const tabKey = `tab:${tab?.id}`;
@@ -214,7 +214,7 @@ function jobCard(job) {
   const status = [
     STATUS_TEXT[job.status] || job.status,
     job.status === 'downloading' || paused ? `${pct}%` : '',
-    job.status === 'done' && job.source === 'youtube' ? 'Saved to Downloads' : '',
+    job.status === 'done' && job.source === 'companion' ? 'Saved to Downloads' : '',
   ].filter(Boolean);
   const stats = [
     sizeText(job),
@@ -256,55 +256,61 @@ function emptyMessage() {
   return ['No videos detected on this page yet.', 'Start playing the video, then open this menu again.'];
 }
 
-const youtubeUrl = youtubeVideoUrl(tab?.url || '');
+// The companion app (yt-dlp) handles sites network detection can't, such as
+// YouTube. Known video pages are looked up as soon as the menu opens.
+const companion = isUnsupportedSite() ? null : companionTarget(tab?.url || '');
+
+function isUnsupportedSite() {
+  try {
+    const host = new URL(tab?.url || '').hostname;
+    return UNSUPPORTED_SITES.some(([re]) => re.test(host));
+  } catch {
+    return false;
+  }
+}
 
 function companionHelp() {
   return el(
     'div',
     { className: 'note' },
-    'YouTube downloads need the companion app. Run ',
+    'This needs the companion app. Run ',
     el('code', { textContent: 'companion\\install.cmd' }),
     ' from the extension folder, then restart your browser.'
   );
 }
 
-// YouTube is handled by the companion app (yt-dlp) instead of network detection.
-async function renderYoutube() {
-  if (!youtubeUrl) return;
-  $youtube.hidden = false;
-  const meta = el('div', { className: 'meta', textContent: 'Loading available qualities…' });
-  const card = el(
+function companionCard(tagText, title) {
+  return el(
     'li',
     { className: 'card' },
     el(
       'div',
       { className: 'card-top' },
-      el('span', { className: 'tag', textContent: 'YOUTUBE' }),
-      el('span', { className: 'name', textContent: tab.title.replace(/ - YouTube$/, ''), title: youtubeUrl })
-    ),
-    meta
+      el('span', { className: 'tag', textContent: tagText.toUpperCase().slice(0, 12) }),
+      el('span', { className: 'name', textContent: title, title: companion.url })
+    )
   );
-  $youtube.replaceChildren(card);
+}
 
-  const res = await chrome.runtime.sendMessage({ type: 'yt-info', pageUrl: youtubeUrl });
-  if (!res?.ok) {
-    meta.remove();
-    if (res?.error === COMPANION_MISSING) {
-      card.append(companionHelp());
-      return;
-    }
-    const update = el('button', { className: 'link', textContent: 'Update yt-dlp and retry' });
-    update.addEventListener('click', async () => {
-      update.textContent = 'Updating…';
-      update.disabled = true;
-      await chrome.runtime.sendMessage({ type: 'yt-update' });
-      renderYoutube();
-    });
-    card.append(el('div', { className: 'note', textContent: res?.error || 'Could not read this video.' }), el('div', { className: 'actions' }, update));
-    return;
-  }
+async function lookUp(useLogin) {
+  const card = companionCard(companion.site, tab.title.replace(/ - YouTube$/, '') || companion.url);
+  const meta = el('div', { className: 'meta', textContent: 'Loading available qualities…' });
+  card.append(meta);
+  $companion.replaceChildren(card);
 
-  meta.textContent = [formatDuration(res.duration), res.uploader].filter(Boolean).join(' · ');
+  const res = await chrome.runtime.sendMessage({ type: 'companion-info', pageUrl: companion.url, useLogin });
+  if (!res?.ok) return showLookupError(card, meta, res?.error, useLogin);
+  meta.textContent = [
+    formatDuration(res.duration),
+    res.uploader,
+    res.count > 1 ? `first of ${res.count} videos on this page` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  // yt-dlp calls its catch-all page scanner 'Generic'; the site's own name reads better.
+  const site = res.site && res.site !== 'Generic' ? res.site : companion.site;
+  card.querySelector('.tag').textContent = site.toUpperCase().slice(0, 12);
+  if (res.title) card.querySelector('.name').textContent = res.title;
   if (res.thumbnail) card.insertBefore(el('img', { className: 'thumb', src: res.thumbnail, alt: '' }), meta);
   if (res.isLive) {
     card.append(el('div', { className: 'note', textContent: 'Live streams cannot be downloaded.' }));
@@ -315,20 +321,22 @@ async function renderYoutube() {
     'select',
     { title: 'Quality' },
     ...res.heights.map((h) => el('option', { value: String(h), textContent: `${h}p` })),
+    res.heights.length ? null : el('option', { value: '0', textContent: 'Best quality' }),
     el('option', { value: 'audio', textContent: 'Audio only (M4A)' })
   );
   // Default to 1080p or the best below it; higher qualities are much larger.
-  select.value = String(res.heights.find((h) => h <= 1080) ?? res.heights[0] ?? 'audio');
+  select.value = String(res.heights.find((h) => h <= 1080) ?? res.heights[0] ?? 0);
   const status = el('div', { className: 'note ok', hidden: true });
   const download = el('button', { className: 'primary', textContent: 'Download' });
   download.addEventListener('click', async () => {
     download.disabled = true;
     const audioOnly = select.value === 'audio';
     const r = await chrome.runtime.sendMessage({
-      type: 'yt-download',
-      pageUrl: youtubeUrl,
+      type: 'companion-download',
+      pageUrl: companion.url,
       audioOnly,
       height: audioOnly ? 0 : Number(select.value),
+      useLogin,
     });
     status.hidden = false;
     status.className = r?.ok ? 'note ok' : 'note';
@@ -336,10 +344,51 @@ async function renderYoutube() {
     download.disabled = false;
   });
   card.append(el('div', { className: 'actions' }, select, download), status);
+  if (useLogin) card.append(el('div', { className: 'meta', textContent: 'Using your browser login for this site.' }));
+}
+
+function showLookupError(card, meta, error, usedLogin) {
+  meta.remove();
+  if (error === COMPANION_MISSING) {
+    card.append(companionHelp());
+    return;
+  }
+  const unsupported = /unsupported url|no video (formats )?found/i.test(error || '');
+  const needsLogin = /log ?in|logged|sign ?in|cookies|private|members|\bage\b|authenticat|registered users/i.test(error || '');
+  const message = unsupported
+    ? 'No downloadable video was found on this page.'
+    : needsLogin && !usedLogin
+      ? 'This video needs an account. Try again with your browser login.'
+      : error || 'Could not read this video.';
+
+  const actions = [];
+  if (!usedLogin) {
+    const login = el('button', { className: needsLogin ? 'primary' : '', textContent: 'Use my browser login' });
+    login.title = "Shares this site's cookies with the companion app on this computer only";
+    login.addEventListener('click', () => lookUp(true));
+    actions.push(login);
+  }
+  if (!unsupported) {
+    const update = el('button', { className: 'link', textContent: 'Update yt-dlp and retry' });
+    update.addEventListener('click', async () => {
+      update.textContent = 'Updating…';
+      update.disabled = true;
+      await chrome.runtime.sendMessage({ type: 'companion-update' });
+      lookUp(usedLogin);
+    });
+    actions.push(update);
+  }
+  card.append(el('div', { className: 'note', textContent: message }), el('div', { className: 'actions' }, ...actions));
+}
+
+function renderCompanion() {
+  if (!companion?.auto) return;
+  $companion.hidden = false;
+  lookUp(false);
 }
 
 function renderItems(entry) {
-  $pageTitle.textContent = youtubeUrl ? '' : tab?.title || '';
+  $pageTitle.textContent = companion?.auto ? '' : tab?.title || '';
   const entries = buildEntries(entry?.items || []);
   // Detection keeps updating the list; keep the qualities the user already picked.
   const picked = new Map();
@@ -351,7 +400,7 @@ function renderItems(entry) {
       if ([...select.options].some((o) => o.value === values[i])) select.value = values[i];
     });
   }
-  $empty.hidden = entries.length > 0 || !!youtubeUrl;
+  $empty.hidden = entries.length > 0 || !!companion?.auto;
   if (!entries.length) {
     const lines = emptyMessage();
     $empty.replaceChildren(...lines.flatMap((line, i) => (i ? [el('br'), line] : [line])));
@@ -377,4 +426,4 @@ chrome.storage.onChanged.addListener((changes, area) => {
 const initial = await chrome.storage.session.get([tabKey, 'jobs']);
 renderItems(initial[tabKey]);
 renderJobs(initial.jobs);
-renderYoutube();
+renderCompanion();

@@ -36,7 +36,7 @@
 | | |
 | --- | --- |
 | **Works almost everywhere** | Finds videos on most websites that play them, with no per-site setup |
-| **YouTube** | Pick the quality, up to 4K, or save just the audio as M4A |
+| **YouTube, X, TikTok & more** | 1,800+ sites through the companion app. Pick the quality, up to 4K, or save just the audio as M4A |
 | **Facebook & Instagram** | Saves the full video with sound, in the quality you choose |
 | **Streaming video** | HLS and DASH streams are downloaded piece by piece and joined into one `.mp4` |
 | **Private** | No account, no ads, no tracking. Nothing is sent anywhere |
@@ -48,7 +48,14 @@
   <picture><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat-square&logo=youtube&logoColor=white" alt="YouTube" /></picture>
   <picture><img src="https://img.shields.io/badge/Facebook-0866FF?style=flat-square&logo=facebook&logoColor=white" alt="Facebook" /></picture>
   <picture><img src="https://img.shields.io/badge/Instagram-E4405F?style=flat-square&logo=instagram&logoColor=white" alt="Instagram" /></picture>
-  <picture><img src="https://img.shields.io/badge/most%20other%20video%20sites-555555?style=flat-square" alt="Most other video sites" /></picture>
+  <picture><img src="https://img.shields.io/badge/X-000000?style=flat-square&logo=x&logoColor=white" alt="X" /></picture>
+  <picture><img src="https://img.shields.io/badge/TikTok-000000?style=flat-square&logo=tiktok&logoColor=white" alt="TikTok" /></picture>
+  <picture><img src="https://img.shields.io/badge/Vimeo-1AB7EA?style=flat-square&logo=vimeo&logoColor=white" alt="Vimeo" /></picture>
+  <picture><img src="https://img.shields.io/badge/Reddit-FF4500?style=flat-square&logo=reddit&logoColor=white" alt="Reddit" /></picture>
+  <picture><img src="https://img.shields.io/badge/Dailymotion-0A0A0A?style=flat-square&logo=dailymotion&logoColor=white" alt="Dailymotion" /></picture>
+  <picture><img src="https://img.shields.io/badge/Twitch-9146FF?style=flat-square&logo=twitch&logoColor=white" alt="Twitch" /></picture>
+  <picture><img src="https://img.shields.io/badge/SoundCloud-FF5500?style=flat-square&logo=soundcloud&logoColor=white" alt="SoundCloud" /></picture>
+  <picture><img src="https://img.shields.io/badge/1%2C800%2B%20more%20sites-555555?style=flat-square" alt="1,800+ more sites" /></picture>
 </p>
 
 > [!NOTE]
@@ -97,9 +104,9 @@ Brave, Opera and Vivaldi work the same way through their own extensions page.
 
 Then click the puzzle-piece icon in the toolbar and **pin** Miracle so it's always one click away.
 
-### 3. YouTube add-on <sub>(optional, Windows)</sub>
+### 3. Companion app <sub>(optional, Windows)</sub>
 
-YouTube can't be downloaded from inside the browser, so it uses a small helper app.
+YouTube, X, TikTok, Vimeo and many other sites can't be downloaded from inside the browser, so they use a small helper app.
 
 1. Open the extracted folder → `companion`
 2. Double-click **`install.cmd`**
@@ -117,7 +124,9 @@ It downloads two well-known free tools, [yt-dlp](https://github.com/yt-dlp/yt-dl
 
 Files are saved to your **Downloads** folder. While a download runs, the menu shows its speed, time left and how much is done. Use the pause, resume and cancel buttons next to it at any time.
 
-On **YouTube** the menu shows the video's thumbnail and title. Pick a quality or **Audio only**, click **Download**, then **Show in folder** when it's done.
+On **YouTube, X, TikTok, Vimeo, Reddit, Dailymotion, Twitch, SoundCloud** and similar sites, the menu shows the video's thumbnail and title. Pick a quality or **Audio only**, click **Download**, then **Show in folder** when it's done.
+
+Some videos are only visible when you're logged in, such as private or members-only posts. For those the menu offers **Use my browser login**. It hands that one site's login cookies to the companion app on your computer, just for that lookup and download. Nothing is sent anywhere else, and the copy is deleted straight after.
 
 ---
 
@@ -130,15 +139,15 @@ Start playing the video, then open the menu again. Some sites only load the vide
 </details>
 
 <details>
-<summary><b>YouTube says the companion app is missing</b></summary>
+<summary><b>The menu says the companion app is missing</b></summary>
 <br />
 Run <code>companion\install.cmd</code> (step 3 above), then close and reopen your browser completely.
 </details>
 
 <details>
-<summary><b>A YouTube download fails</b></summary>
+<summary><b>A YouTube (or other site) download fails</b></summary>
 <br />
-YouTube changes often. Click <b>Update yt-dlp and retry</b> in the menu.
+Sites change often. Click <b>Update yt-dlp and retry</b> in the menu. If it says the video needs an account, use <b>Use my browser login</b> while you're logged in to the site.
 </details>
 
 <details>
@@ -157,12 +166,12 @@ Every extension installed with <b>Load unpacked</b> shows that notice. It's safe
 
 ## Update
 
-Download the ZIP again, replace the files in your folder, then click **Reload** on the extension in `edge://extensions` or `chrome://extensions`. If you use YouTube, run `companion\install.cmd` again too.
+Download the ZIP again, replace the files in your folder, then click **Reload** on the extension in `edge://extensions` or `chrome://extensions`. If you use the companion app, run `companion\install.cmd` again too.
 
 ## Uninstall
 
 - Click **Remove** on the extension in `edge://extensions` or `chrome://extensions`
-- If you installed the YouTube add-on, double-click `companion\uninstall.cmd`
+- If you installed the companion app, double-click `companion\uninstall.cmd`
 
 ---
 

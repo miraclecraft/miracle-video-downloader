@@ -19,7 +19,7 @@ using System.Web.Script.Serialization;
 
 static class Host
 {
-    const string Version = "1.0.0";
+    const string Version = "1.1.0";
 
     static readonly object WriteLock = new object();
     static readonly Dictionary<string, Process> Jobs = new Dictionary<string, Process>();
@@ -109,7 +109,7 @@ static class Host
                     Reply(reqId, Obj("version", Version, "ytdlp", RunCapture("--version").Trim()));
                     break;
                 case "info":
-                    Reply(reqId, Info(Str(msg, "url")));
+                    Reply(reqId, Info(Str(msg, "url"), Str(msg, "cookies")));
                     break;
                 case "download":
                     Download(msg);
@@ -147,11 +147,40 @@ static class Host
         Send(data);
     }
 
-    // Video metadata and the qualities that can be offered.
-    static Dictionary<string, object> Info(string url)
+    // Video metadata and the qualities that can be offered. A page with several
+    // videos comes back as a playlist; the first one is offered, and its own URL
+    // is what gets downloaded.
+    static Dictionary<string, object> Info(string url, string cookies)
     {
-        string json = RunCapture("-J", "--no-playlist", "--no-warnings", url);
+        string cookieFile = WriteCookies(cookies);
+        string json;
+        try
+        {
+            var args = new List<string> { "-J", "--no-playlist", "--no-warnings" };
+            if (cookieFile != null) args.AddRange(new[] { "--cookies", cookieFile });
+            args.Add(url);
+            json = RunCapture(args.ToArray());
+        }
+        finally
+        {
+            DeleteQuietly(cookieFile);
+        }
         var info = Json.Deserialize<Dictionary<string, object>>(json);
+        int count = 1, item = 0;
+        if (Str(info, "_type") == "playlist")
+        {
+            string pageUrl = Str(info, "webpage_url") ?? url;
+            var entries = info.ContainsKey("entries") ? info["entries"] as System.Collections.ArrayList : null;
+            Dictionary<string, object> first = null;
+            if (entries != null)
+                for (int i = 0; i < entries.Count && first == null; i++)
+                    if (entries[i] is Dictionary<string, object>) { first = (Dictionary<string, object>)entries[i]; item = i + 1; }
+            if (first == null) throw new Exception("No video found on this page");
+            count = entries.Count;
+            info = first;
+            // Videos embedded in a page share its URL; only their position picks one.
+            if ((Str(info, "webpage_url") ?? pageUrl) != pageUrl) item = 0;
+        }
         var heights = new SortedSet<int>();
         var formats = info.ContainsKey("formats") ? info["formats"] as System.Collections.ArrayList : null;
         if (formats != null)
@@ -167,6 +196,10 @@ static class Host
         var list = new List<int>(heights);
         list.Reverse();
         return Obj(
+            "url", Str(info, "webpage_url") ?? Str(info, "original_url") ?? url,
+            "site", Str(info, "extractor_key"),
+            "count", count,
+            "item", item,
             "id", Str(info, "id"),
             "title", Str(info, "title"),
             "uploader", Str(info, "uploader"),
@@ -211,17 +244,33 @@ static class Host
         };
         if (audioOnly)
         {
-            args.AddRange(new[] { "-f", "ba[ext=m4a]/ba", "-x", "--audio-format", "m4a" });
+            // Sites without a separate audio stream: take the video and extract its audio.
+            args.AddRange(new[] { "-f", "ba[ext=m4a]/ba/b", "-x", "--audio-format", "m4a" });
         }
         else
         {
             // Prefer H.264 + AAC in MP4 so the result plays in any Windows player;
             // above 1080p YouTube only has VP9/AV1, which the resolution still wins over.
-            args.AddRange(new[] { "-f", "bv*+ba/b", "-S", (height > 0 ? "res:" + height + "," : "") + "vcodec:h264,ext:mp4:m4a", "--merge-output-format", "mp4" });
+            // MKV is the fallback for streams MP4 can't hold.
+            args.AddRange(new[] { "-f", "bv*+ba/b", "-S", (height > 0 ? "res:" + height + "," : "") + "vcodec:h264,ext:mp4:m4a", "--merge-output-format", "mp4/mkv" });
         }
+        int item = 0;
+        int.TryParse(Str(msg, "item"), out item);
+        if (item > 0) args.AddRange(new[] { "--playlist-items", item.ToString() });
+        string cookieFile = WriteCookies(Str(msg, "cookies"));
+        if (cookieFile != null) args.AddRange(new[] { "--cookies", cookieFile });
         args.Add(url);
 
-        Process p = Start(args.ToArray());
+        Process p;
+        try
+        {
+            p = Start(args.ToArray());
+        }
+        catch
+        {
+            DeleteQuietly(cookieFile);
+            throw;
+        }
         lock (Jobs) Jobs[jobId] = p;
 
         // Video and audio download one after another (each is a "phase").
@@ -291,6 +340,7 @@ static class Host
         p.BeginOutputReadLine();
         p.BeginErrorReadLine();
         p.WaitForExit();
+        DeleteQuietly(cookieFile);
 
         bool stopped, paused;
         lock (Jobs)
@@ -371,6 +421,22 @@ static class Host
             }
             catch { }
         }
+    }
+
+    // The browser login (cookies) for one lookup or download, when the user asked
+    // for it. Written to a private temp file for yt-dlp and deleted afterwards.
+    static string WriteCookies(string cookies)
+    {
+        if (string.IsNullOrEmpty(cookies)) return null;
+        string path = Path.Combine(Path.GetTempPath(), "miracle-cookies-" + Guid.NewGuid().ToString("N") + ".txt");
+        File.WriteAllText(path, cookies, new UTF8Encoding(false));
+        return path;
+    }
+
+    static void DeleteQuietly(string path)
+    {
+        try { if (path != null && File.Exists(path)) File.Delete(path); }
+        catch { }
     }
 
     static void Reveal(string path)

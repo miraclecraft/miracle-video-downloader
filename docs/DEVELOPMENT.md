@@ -1,6 +1,6 @@
 # Development guide
 
-Miracle - Video Downloader is a Manifest V3 extension with no build step: the folder is loaded as-is with **Load unpacked**. Only the YouTube companion app is compiled, and its installer does that on the user's machine.
+Miracle - Video Downloader is a Manifest V3 extension with no build step: the folder is loaded as-is with **Load unpacked**. Only the companion app is compiled, and its installer does that on the user's machine.
 
 ## How it works
 
@@ -12,7 +12,7 @@ Miracle - Video Downloader is a Manifest V3 extension with no build step: the fo
 - **Facebook & Instagram** – the CDN serves byte-range slices; the range parameters are stripped to get whole files, each file's MP4 header is probed to tell video-only from audio-only, and the audio is paired with its video via the asset id in the `efg` URL parameter (falling back to "detected at about the same time").
 - **Merging** runs [ffmpeg.wasm](https://github.com/ffmpegwasm/ffmpeg.wasm) in an offscreen document (stream copy, no re-encoding).
 - **Referer** – the page's `Referer` is added to the extension's own requests with session `declarativeNetRequest` rules, which many CDNs require.
-- **YouTube** – handled by the companion app (below), because YouTube's streams can't be fetched from an extension.
+- **YouTube, X, TikTok, Vimeo and other yt-dlp sites** – handled by the companion app (below), because their streams can't be fetched from an extension. `lib/companion.js` lists the sites whose video pages are looked up automatically.
 
 ## Project layout
 
@@ -27,9 +27,9 @@ Miracle - Video Downloader is a Manifest V3 extension with no build step: the fo
 | `lib/dash.js` | MPD manifest parser |
 | `lib/mp4.js` | MP4 header probe (tracks, resolution, duration) and container sniffing |
 | `lib/social.js` | Facebook / Instagram CDN URL handling |
-| `lib/youtube.js` | YouTube video page detection |
+| `lib/companion.js` | Pages handled by the companion app, and the cookie file format for "Use my browser login" |
 | `lib/common.js` | Shared helpers (entry grouping, formatting, filenames) |
-| `companion/` | YouTube companion app (C# native messaging host) and its installer/uninstaller |
+| `companion/` | Companion app (C# native messaging host) and its installer/uninstaller |
 | `vendor/` | ffmpeg.wasm runtime (`@ffmpeg/ffmpeg`, `@ffmpeg/core`), committed so no npm install is needed |
 | `scripts/vendor.mjs` | Copies ffmpeg.wasm from `node_modules` into `vendor/` |
 | `test/merge-test.html` | Browser smoke test for DASH parsing + ffmpeg merge |
@@ -51,7 +51,7 @@ Miracle - Video Downloader is a Manifest V3 extension with no build step: the fo
 
 The matching private key, `key.pem`, is **not** in the repository (see `.gitignore`). Keep a backup of it somewhere safe: it's needed to pack the extension as a `.crx` with the same ID.
 
-## YouTube companion app
+## Companion app
 
 `companion/host.cs` is a small [native messaging](https://learn.microsoft.com/microsoft-edge/extensions/developer-guide/native-messaging) host. The extension talks to it over stdin/stdout (4-byte length + JSON), and it runs `yt-dlp` with `ffmpeg` to save MP4 files to the user's Downloads folder.
 
@@ -63,7 +63,9 @@ The matching private key, `key.pem`, is **not** in the repository (see `.gitigno
 
 Options: `-SkipFfmpeg` (keep the existing ffmpeg), `-ExtensionId <id>,<id>` (allow other extension IDs, e.g. a store build).
 
-Requests the host understands: `ping`, `info`, `download`, `cancel`, `reveal`, `update`. Downloads report `progress` events and finish with `done`, `error` or `cancelled`.
+Requests the host understands: `ping`, `info`, `download`, `pause`, `cancel`, `reveal`, `update`. Downloads report `progress` events (bytes, total, speed, ETA) and finish with `done`, `paused`, `error` or `cancelled`. Pausing stops yt-dlp and keeps its `.part` files, so running the same download again resumes it; cancelling deletes them.
+
+`info` and `download` accept an optional `cookies` field (Netscape cookie file text). The extension only sends it after the user clicks **Use my browser login**, reads it fresh from `chrome.cookies` for that site, and never stores it; the host writes it to a temp file for yt-dlp and deletes it when yt-dlp exits.
 
 ## Updating ffmpeg.wasm
 
@@ -83,7 +85,7 @@ Change the versions in `package.json` first if you want a newer release.
 ## Limitations
 
 - DRM-protected content (Widevine, PlayReady, FairPlay, SAMPLE-AES) is intentionally not supported.
-- The companion app is Windows-only, and YouTube live streams aren't supported.
+- The companion app is Windows-only, and live streams aren't supported through it.
 - Live DASH isn't supported; live HLS saves only the segments currently listed.
 - Merged downloads are assembled in memory, so very long videos use a lot of RAM (ffmpeg.wasm is limited to about 2 GB).
 - On busy Facebook/Instagram feeds the time-based audio pairing fallback can pick the wrong audio.

@@ -2,7 +2,7 @@ import { buildEntries, sanitizeFilename, speedMeter, etaSeconds } from './lib/co
 import { parsePlaylist, isDrmProtected, audioForVariant } from './lib/hls.js';
 import { probeMp4 } from './lib/mp4.js';
 import { isSocialHost, normalizeSocialUrl, socialHints } from './lib/social.js';
-import { youtubeVideoUrl, COMPANION_MISSING } from './lib/youtube.js';
+import { companionTarget, toNetscapeCookies, COMPANION_MISSING } from './lib/companion.js';
 
 const HLS_MIME = new Set(['application/vnd.apple.mpegurl', 'application/x-mpegurl', 'audio/mpegurl', 'audio/x-mpegurl']);
 const DASH_MIME = new Set(['application/dash+xml']);
@@ -29,8 +29,8 @@ const PAIR_WINDOW_MS = 20_000;
 
 // tabId -> { items: [...] }, mirrored to storage.session so it survives worker restarts.
 const state = new Map();
-// Tabs currently showing a YouTube video (handled by the companion app).
-const youtubeTabs = new Set();
+// Tabs showing a video page the companion app looks up automatically (YouTube, X, TikTok…).
+const companionTabs = new Set();
 let jobs = {};
 
 const ready = chrome.storage.session.get(null).then((all) => {
@@ -112,15 +112,15 @@ chrome.webRequest.onHeadersReceived.addListener(
 );
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  youtubeTabs.delete(tabId);
+  companionTabs.delete(tabId);
   clearTab(tabId);
 });
 
-// YouTube navigates without page loads, so follow URL changes instead.
+// Sites like YouTube navigate without page loads, so follow URL changes instead.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (!changeInfo.url) return;
-  if (youtubeVideoUrl(changeInfo.url)) youtubeTabs.add(tabId);
-  else youtubeTabs.delete(tabId);
+  if (companionTarget(changeInfo.url)?.auto) companionTabs.add(tabId);
+  else companionTabs.delete(tabId);
   updateBadge(tabId);
 });
 
@@ -299,7 +299,7 @@ function persistTab(tabId) {
 }
 
 function updateBadge(tabId) {
-  const count = buildEntries(state.get(tabId)?.items || []).length + (youtubeTabs.has(tabId) ? 1 : 0);
+  const count = buildEntries(state.get(tabId)?.items || []).length + (companionTabs.has(tabId) ? 1 : 0);
   chrome.action.setBadgeText({ tabId, text: count ? String(count) : '' }).catch(() => {});
 }
 
@@ -503,7 +503,7 @@ async function cancelJob(jobId) {
   await ready;
   const job = jobs[jobId];
   if (!job) return;
-  if (job.source === 'youtube') hostRequest({ type: 'cancel', jobId, partials: job.partials || [] }).catch(() => {});
+  if (job.source === 'companion') hostRequest({ type: 'cancel', jobId, partials: job.partials || [] }).catch(() => {});
   else if (job.source !== 'browser') chrome.runtime.sendMessage({ target: 'offscreen', type: 'cancel', jobId }).catch(() => {});
   if (job.downloadId) chrome.downloads.cancel(job.downloadId).catch(() => {});
   updateJob(jobId, { status: 'cancelled', speed: 0, eta: 0 });
@@ -514,7 +514,7 @@ async function pauseJob(jobId) {
   await ready;
   const job = jobs[jobId];
   if (job?.status !== 'downloading') return;
-  if (job.source === 'youtube') await hostRequest({ type: 'pause', jobId });
+  if (job.source === 'companion') await hostRequest({ type: 'pause', jobId });
   else if (job.source === 'browser') await chrome.downloads.pause(job.downloadId);
   else await chrome.runtime.sendMessage({ target: 'offscreen', type: 'pause', jobId });
   meters.get(jobId)?.reset();
@@ -525,9 +525,9 @@ async function resumeJob(jobId) {
   await ready;
   const job = jobs[jobId];
   if (job?.status !== 'paused') return;
-  if (job.source === 'youtube') {
+  if (job.source === 'companion') {
     updateJob(jobId, { status: 'starting' });
-    runYoutubeJob(job);
+    runCompanionJob(job);
     return;
   }
   try {
@@ -556,7 +556,7 @@ async function clearFinishedJobs() {
 const NATIVE_HOST = 'com.miracle.videodownloader';
 let hostPort = null;
 const hostRequests = new Map(); // reqId -> { resolve, reject }
-const youtubeInfo = new Map(); // watch URL -> info promise
+const companionInfo = new Map(); // "url" or "url|login" -> info promise
 
 function connectHost() {
   if (hostPort) return hostPort;
@@ -569,9 +569,9 @@ function connectHost() {
     hostPort = null;
     for (const { reject } of hostRequests.values()) reject(new Error(error));
     hostRequests.clear();
-    youtubeInfo.clear();
+    companionInfo.clear();
     for (const job of Object.values(jobs)) {
-      if (job.source === 'youtube' && ACTIVE.has(job.status)) updateJob(job.id, { status: 'error', error });
+      if (job.source === 'companion' && ACTIVE.has(job.status)) updateJob(job.id, { status: 'error', error });
     }
   });
   hostPort = port;
@@ -623,45 +623,60 @@ function onHostMessage(msg) {
   }
 }
 
-function getYoutubeInfo(pageUrl) {
-  const url = youtubeVideoUrl(pageUrl);
-  if (!url) return Promise.reject(new Error('Not a YouTube video page'));
-  if (!youtubeInfo.has(url)) {
-    const request = hostRequest({ type: 'info', url }, 60000);
-    request.catch(() => youtubeInfo.delete(url));
-    youtubeInfo.set(url, request);
-  }
-  return youtubeInfo.get(url);
+// The user's login for a site, shared with the companion app only when they
+// ask for it ("Use my browser login"), for videos that need an account.
+async function loginCookies(url) {
+  const cookies = await chrome.cookies.getAll({ url });
+  return cookies.length ? toNetscapeCookies(cookies) : undefined;
 }
 
-async function startYoutubeDownload({ pageUrl, height, audioOnly }) {
+function getCompanionInfo(pageUrl, useLogin = false) {
+  const target = companionTarget(pageUrl);
+  if (!target) return Promise.reject(new Error('This page cannot be looked up'));
+  const key = useLogin ? `${target.url}|login` : target.url;
+  if (!companionInfo.has(key)) {
+    const request = (async () => {
+      const cookies = useLogin ? await loginCookies(target.url) : undefined;
+      // Unknown pages can take a while: yt-dlp scans them for embedded players.
+      return hostRequest({ type: 'info', url: target.url, cookies }, 90000);
+    })();
+    request.catch(() => companionInfo.delete(key));
+    companionInfo.set(key, request);
+  }
+  return companionInfo.get(key);
+}
+
+async function startCompanionDownload({ pageUrl, height, audioOnly, useLogin }) {
   await ready;
-  const url = youtubeVideoUrl(pageUrl);
-  if (!url) throw new Error('Not a YouTube video page');
-  const info = await getYoutubeInfo(url);
+  const info = await getCompanionInfo(pageUrl, useLogin);
   if (info.isLive) throw new Error('Live streams cannot be downloaded');
   const id = crypto.randomUUID();
   const label = audioOnly ? ' (audio)' : height ? ` (${height}p)` : '';
   jobs[id] = {
     id,
-    source: 'youtube',
-    title: (info.title || 'YouTube video') + label,
+    source: 'companion',
+    title: (info.title || `${info.site || 'Web'} video`) + label,
     status: 'starting',
     progress: 0,
     createdAt: Date.now(),
-    request: { url, height: height || 0, audioOnly: !!audioOnly },
+    useLogin: !!useLogin,
+    request: { url: info.url, item: info.item || 0, height: height || 0, audioOnly: !!audioOnly },
   };
   saveJobs();
-  runYoutubeJob(jobs[id]);
+  runCompanionJob(jobs[id]);
   return { ok: true, jobId: id };
 }
 
 // Also used to resume: running the same download again makes yt-dlp continue
-// from its partial files. The host answers only once it has stopped.
-function runYoutubeJob(job) {
-  hostRequest({ type: 'download', jobId: job.id, ...job.request }).catch((e) =>
-    updateJob(job.id, { status: 'error', error: e.message })
-  );
+// from its partial files. The host answers only once it has stopped. Cookies
+// are read fresh each time rather than kept with the job.
+async function runCompanionJob(job) {
+  try {
+    const cookies = job.useLogin ? await loginCookies(job.request.url) : undefined;
+    await hostRequest({ type: 'download', jobId: job.id, ...job.request, cookies });
+  } catch (e) {
+    updateJob(job.id, { status: 'error', error: e.message });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -699,12 +714,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return;
     case 'set-referer':
       return respond(setReferer(msg.hosts, msg.referer), sendResponse);
-    case 'yt-info':
-      return respond(getYoutubeInfo(msg.pageUrl), sendResponse);
-    case 'yt-download':
-      return respond(startYoutubeDownload(msg), sendResponse);
-    case 'yt-update':
-      youtubeInfo.clear();
+    case 'companion-info':
+      return respond(getCompanionInfo(msg.pageUrl, msg.useLogin), sendResponse);
+    case 'companion-download':
+      return respond(startCompanionDownload(msg), sendResponse);
+    case 'companion-update':
+      companionInfo.clear();
       return respond(hostRequest({ type: 'update' }), sendResponse);
     case 'reveal':
       return respond(hostRequest({ type: 'reveal', path: msg.path }), sendResponse);

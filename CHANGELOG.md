@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0
+
+- Companion app works on 1,800+ sites, not just YouTube: X, TikTok, Vimeo, Reddit, Dailymotion, Twitch, SoundCloud, Bilibili and more
+- Video pages on those sites are recognised automatically, with the site shown on the card
+- "Use my browser login" for videos that need an account (private or members-only)
+- Pages with several videos offer the first one instead of downloading them all
+- Falls back to MKV when a site's video and audio can't be stored in MP4
+
 ## 1.0.0
 
 - Download cards show speed, time left and "downloaded of total size"
