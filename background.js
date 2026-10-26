@@ -1,4 +1,4 @@
-import { buildEntries, sanitizeFilename } from './lib/common.js';
+import { buildEntries, sanitizeFilename, speedMeter, etaSeconds } from './lib/common.js';
 import { parsePlaylist, isDrmProtected, audioForVariant } from './lib/hls.js';
 import { probeMp4 } from './lib/mp4.js';
 import { isSocialHost, normalizeSocialUrl, socialHints } from './lib/social.js';
@@ -38,6 +38,7 @@ const ready = chrome.storage.session.get(null).then((all) => {
     if (key.startsWith('tab:')) state.set(Number(key.slice(4)), value);
   }
   jobs = all.jobs || {};
+  watchDownloads();
 });
 
 chrome.action.setBadgeBackgroundColor({ color: '#2563eb' });
@@ -376,13 +377,18 @@ async function startDownload({ tabId, itemId, choice = {} }) {
   const base = sanitizeFilename(tab?.title) + (quality ? ` (${quality}p)` : '');
 
   const tracks = buildTracks(item, choice, tabItems);
+  const id = crypto.randomUUID();
   if (!tracks) {
+    // A single complete file: the browser's download manager fetches it, and
+    // its progress is mirrored into a job so the popup can show and pause it.
     await setReferer([new URL(item.url).hostname], tab?.url);
-    await chrome.downloads.download({ url: item.url, filename: base + fileExtension(item), conflictAction: 'uniquify' });
-    return { ok: true, direct: true };
+    const downloadId = await chrome.downloads.download({ url: item.url, filename: base + fileExtension(item), conflictAction: 'uniquify' });
+    jobs[id] = { id, source: 'browser', title: base, status: 'downloading', progress: 0, bytes: 0, total: item.size || 0, downloadId, createdAt: Date.now() };
+    saveJobs();
+    watchDownloads();
+    return { ok: true, jobId: id };
   }
 
-  const id = crypto.randomUUID();
   jobs[id] = { id, title: base, status: 'starting', progress: 0, bytes: 0, createdAt: Date.now() };
   saveJobs();
   await ensureOffscreen();
@@ -438,26 +444,105 @@ chrome.downloads.onChanged.addListener(async (delta) => {
   await ready;
   const job = Object.values(jobs).find((j) => j.downloadId === delta.id);
   if (!job) return;
-  if (delta.state.current === 'complete') {
-    updateJob(job.id, { status: 'done' });
-    revokeBlob(job.id);
+  const done = delta.state.current === 'complete';
+  if (done) {
+    updateJob(job.id, { status: 'done', progress: 1, speed: 0, eta: 0, ...(job.total && { bytes: job.total }) });
   } else if (delta.state.current === 'interrupted') {
-    updateJob(job.id, { status: 'error', error: delta.error?.current || 'Download interrupted' });
-    revokeBlob(job.id);
-  }
+    const reason = delta.error?.current;
+    updateJob(job.id, reason === 'USER_CANCELED' ? { status: 'cancelled' } : { status: 'error', error: reason || 'Download interrupted' });
+  } else return;
+  if (job.source !== 'browser') revokeBlob(job.id);
 });
+
+const ACTIVE = new Set(['starting', 'downloading', 'merging', 'saving']);
+const FINISHED = new Set(['done', 'error', 'cancelled']);
+
+// The download manager has no progress events, so poll it while direct
+// downloads are running.
+let watchTimer = null;
+const meters = new Map(); // jobId -> speedMeter
+
+function watchDownloads() {
+  if (watchTimer || !Object.values(jobs).some(isWatched)) return;
+  watchTimer = setInterval(pollDownloads, 1000);
+  pollDownloads();
+}
+
+function isWatched(job) {
+  return job.source === 'browser' && (ACTIVE.has(job.status) || job.status === 'paused');
+}
+
+async function pollDownloads() {
+  await ready;
+  const watched = Object.values(jobs).filter(isWatched);
+  if (!watched.length) {
+    clearInterval(watchTimer);
+    watchTimer = null;
+    meters.clear();
+    return;
+  }
+  for (const job of watched) {
+    const [d] = await chrome.downloads.search({ id: job.downloadId }).catch(() => []);
+    if (!d || d.state !== 'in_progress') continue; // onChanged reports the end
+    if (!meters.has(job.id)) meters.set(job.id, speedMeter());
+    const meter = meters.get(job.id);
+    const total = d.totalBytes > 0 ? d.totalBytes : job.total || 0;
+    const patch = { bytes: d.bytesReceived, total, progress: total ? d.bytesReceived / total : 0 };
+    if (d.paused) {
+      meter.reset();
+      Object.assign(patch, { status: 'paused', speed: 0, eta: 0 });
+    } else {
+      const speed = meter.update(d.bytesReceived);
+      Object.assign(patch, { status: 'downloading', speed, eta: etaSeconds(d.bytesReceived, total, speed) });
+    }
+    if (isWatched(jobs[job.id])) updateJob(job.id, patch); // it may have finished meanwhile
+  }
+}
 
 async function cancelJob(jobId) {
   await ready;
   const job = jobs[jobId];
   if (!job) return;
-  if (job.source === 'youtube') hostRequest({ type: 'cancel', jobId }).catch(() => {});
-  else chrome.runtime.sendMessage({ target: 'offscreen', type: 'cancel', jobId }).catch(() => {});
+  if (job.source === 'youtube') hostRequest({ type: 'cancel', jobId, partials: job.partials || [] }).catch(() => {});
+  else if (job.source !== 'browser') chrome.runtime.sendMessage({ target: 'offscreen', type: 'cancel', jobId }).catch(() => {});
   if (job.downloadId) chrome.downloads.cancel(job.downloadId).catch(() => {});
-  updateJob(jobId, { status: 'cancelled' });
+  updateJob(jobId, { status: 'cancelled', speed: 0, eta: 0 });
 }
 
-const FINISHED = new Set(['done', 'error', 'cancelled']);
+// Merging and saving can't be interrupted, so only downloading jobs pause.
+async function pauseJob(jobId) {
+  await ready;
+  const job = jobs[jobId];
+  if (job?.status !== 'downloading') return;
+  if (job.source === 'youtube') await hostRequest({ type: 'pause', jobId });
+  else if (job.source === 'browser') await chrome.downloads.pause(job.downloadId);
+  else await chrome.runtime.sendMessage({ target: 'offscreen', type: 'pause', jobId });
+  meters.get(jobId)?.reset();
+  updateJob(jobId, { status: 'paused', speed: 0, eta: 0 });
+}
+
+async function resumeJob(jobId) {
+  await ready;
+  const job = jobs[jobId];
+  if (job?.status !== 'paused') return;
+  if (job.source === 'youtube') {
+    updateJob(jobId, { status: 'starting' });
+    runYoutubeJob(job);
+    return;
+  }
+  try {
+    if (job.source === 'browser') {
+      await chrome.downloads.resume(job.downloadId);
+      watchDownloads();
+    } else {
+      const res = await chrome.runtime.sendMessage({ target: 'offscreen', type: 'resume', jobId });
+      if (!res?.ok) throw new Error('This download can no longer be resumed');
+    }
+    updateJob(jobId, { status: 'downloading' });
+  } catch (e) {
+    updateJob(jobId, { status: 'error', error: e.message });
+  }
+}
 
 async function clearFinishedJobs() {
   await ready;
@@ -469,7 +554,6 @@ async function clearFinishedJobs() {
 // Companion app (native messaging host running yt-dlp)
 
 const NATIVE_HOST = 'com.miracle.videodownloader';
-const ACTIVE = new Set(['starting', 'downloading', 'merging', 'saving']);
 let hostPort = null;
 const hostRequests = new Map(); // reqId -> { resolve, reject }
 const youtubeInfo = new Map(); // watch URL -> info promise
@@ -522,14 +606,20 @@ function onHostMessage(msg) {
     else request?.reject(new Error(msg.error));
     return;
   }
+  const job = jobs[msg.jobId];
   if (msg.type === 'progress') {
-    updateJob(msg.jobId, { status: msg.status, progress: msg.progress, speed: msg.speed, eta: msg.eta });
+    // Lines yt-dlp printed just before it was stopped can arrive after a pause.
+    if (job?.status === 'paused' || job?.status === 'cancelled') return;
+    const { status, progress, bytes, total, totalEstimated, speed, eta } = msg;
+    updateJob(msg.jobId, { status, progress, bytes, total, totalEstimated, speed, eta });
+  } else if (msg.type === 'paused') {
+    updateJob(msg.jobId, { status: 'paused', speed: 0, eta: 0, partials: msg.partials || [] });
   } else if (msg.type === 'done') {
-    updateJob(msg.jobId, { status: 'done', progress: 1, file: msg.file, speed: '', eta: '' });
+    updateJob(msg.jobId, { status: 'done', progress: 1, file: msg.file, speed: 0, eta: 0, partials: undefined });
   } else if (msg.type === 'error') {
-    updateJob(msg.jobId, { status: 'error', error: msg.error });
+    updateJob(msg.jobId, { status: 'error', error: msg.error, speed: 0, eta: 0 });
   } else if (msg.type === 'cancelled') {
-    updateJob(msg.jobId, { status: 'cancelled' });
+    updateJob(msg.jobId, { status: 'cancelled', speed: 0, eta: 0 });
   }
 }
 
@@ -552,13 +642,26 @@ async function startYoutubeDownload({ pageUrl, height, audioOnly }) {
   if (info.isLive) throw new Error('Live streams cannot be downloaded');
   const id = crypto.randomUUID();
   const label = audioOnly ? ' (audio)' : height ? ` (${height}p)` : '';
-  jobs[id] = { id, source: 'youtube', title: (info.title || 'YouTube video') + label, status: 'starting', progress: 0, createdAt: Date.now() };
+  jobs[id] = {
+    id,
+    source: 'youtube',
+    title: (info.title || 'YouTube video') + label,
+    status: 'starting',
+    progress: 0,
+    createdAt: Date.now(),
+    request: { url, height: height || 0, audioOnly: !!audioOnly },
+  };
   saveJobs();
-  // The host answers this request only when the download has finished.
-  hostRequest({ type: 'download', jobId: id, url, height: height || 0, audioOnly: !!audioOnly }).catch((e) =>
-    updateJob(id, { status: 'error', error: e.message })
-  );
+  runYoutubeJob(jobs[id]);
   return { ok: true, jobId: id };
+}
+
+// Also used to resume: running the same download again makes yt-dlp continue
+// from its partial files. The host answers only once it has stopped.
+function runYoutubeJob(job) {
+  hostRequest({ type: 'download', jobId: job.id, ...job.request }).catch((e) =>
+    updateJob(job.id, { status: 'error', error: e.message })
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -582,6 +685,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return respond(startDownload(msg), sendResponse);
     case 'cancel-job':
       return respond(cancelJob(msg.jobId), sendResponse);
+    case 'pause-job':
+      return respond(pauseJob(msg.jobId), sendResponse);
+    case 'resume-job':
+      return respond(resumeJob(msg.jobId), sendResponse);
     case 'clear-jobs':
       return respond(clearFinishedJobs(), sendResponse);
     case 'job-update':

@@ -200,6 +200,54 @@ button.link {
   transition: width 0.3s;
 }
 
+.icon-buttons {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+
+button.icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+button.icon svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+button.icon.resume svg {
+  fill: currentColor;
+}
+
+button.icon.resume {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+button.icon.cancel:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.progress.paused > div {
+  background: var(--muted);
+}
+
+.meta.stats {
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
 .list + .list:not(:empty) {
   margin-top: 8px;
 }

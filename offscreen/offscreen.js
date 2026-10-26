@@ -4,12 +4,59 @@
 import { parsePlaylist, isDrmProtected, audioForVariant } from '../lib/hls.js';
 import { parseMpd, summarizeMpd } from '../lib/dash.js';
 import { sniffContainer } from '../lib/mp4.js';
+import { speedMeter, etaSeconds } from '../lib/common.js';
 
 const CONCURRENCY = 6;
 const RETRIES = 3;
 
-const controllers = new Map(); // jobId -> AbortController
+const controls = new Map(); // jobId -> JobControl
 const blobUrls = new Map(); // jobId -> blob URL
+
+// Cancel and pause for one job. Pausing aborts the requests in flight; they
+// wait at gate() and continue from the bytes they already have on resume.
+class JobControl {
+  #cancel = new AbortController();
+  #pause = null;
+  #waiters = [];
+  paused = false;
+
+  get cancelled() {
+    return this.#cancel.signal.aborted;
+  }
+
+  // For requests that shouldn't be interrupted by a pause (playlists, manifests).
+  get cancelSignal() {
+    return this.#cancel.signal;
+  }
+
+  cancel() {
+    this.#cancel.abort();
+    this.resume();
+  }
+
+  pause() {
+    this.paused = true;
+    this.#pause?.abort();
+    this.#pause = null;
+  }
+
+  resume() {
+    this.paused = false;
+    for (const wake of this.#waiters.splice(0)) wake();
+  }
+
+  async gate() {
+    while (this.paused && !this.cancelled) await new Promise((r) => this.#waiters.push(r));
+    if (this.cancelled) throw new DOMException('Aborted', 'AbortError');
+  }
+
+  // Signal for one request: aborted by cancel, or by a pause.
+  signal() {
+    this.#pause ??= new AbortController();
+    if (this.paused) this.#pause.abort();
+    return AbortSignal.any([this.#cancel.signal, this.#pause.signal]);
+  }
+}
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.target !== 'offscreen') return;
@@ -20,9 +67,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       sendResponse({ ok: true });
       return;
     case 'cancel':
-      controllers.get(msg.jobId)?.abort();
+      controls.get(msg.jobId)?.cancel();
       sendResponse({ ok: true });
       return;
+    case 'pause':
+    case 'resume': {
+      const control = controls.get(msg.jobId);
+      if (control) msg.type === 'pause' ? control.pause() : control.resume();
+      sendResponse({ ok: !!control });
+      return;
+    }
     case 'revoke': {
       const url = blobUrls.get(msg.jobId);
       if (url) URL.revokeObjectURL(url);
@@ -54,20 +108,33 @@ async function setReferer(urls, referer) {
 // ---------------------------------------------------------------------------
 // Fetching
 
-async function fetchBytes(url, byterange, signal, onBytes) {
-  const headers = byterange
-    ? { Range: `bytes=${byterange.offset}-${byterange.offset + byterange.length - 1}` }
-    : undefined;
-  for (let attempt = 1; ; attempt++) {
-    let received = 0;
+// Fetches a whole file (or byte range). After a pause or a dropped connection
+// it asks for the remaining bytes only, so nothing is downloaded twice.
+// onBytes(delta, received, total) reports progress; total is 0 when unknown.
+async function fetchBytes(url, byterange, control, onBytes = () => {}) {
+  const start = byterange?.offset ?? 0;
+  const end = byterange ? byterange.offset + byterange.length - 1 : '';
+  const chunks = [];
+  let received = 0;
+  let total = byterange?.length || 0;
+  let failures = 0;
+  for (;;) {
+    await control.gate();
+    const headers = byterange || received ? { Range: `bytes=${start + received}-${end}` } : undefined;
     try {
-      const res = await fetch(url, { headers, signal, credentials: 'include' });
+      const res = await fetch(url, { headers, signal: control.signal(), credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP ${res.status} for ${new URL(url).pathname}`);
-      if (!onBytes) return new Uint8Array(await res.arrayBuffer());
-      // Stream large files so progress can be reported while they download.
-      const total = Number(res.headers.get('content-length')) || 0;
+      if (received && res.status !== 206) {
+        // The server ignored the Range header and sent everything again.
+        onBytes(-received, 0, total);
+        chunks.length = 0;
+        received = 0;
+      }
+      if (!total) {
+        const range = res.headers.get('content-range')?.match(/\/(\d+)\s*$/);
+        total = range ? Number(range[1]) : received + (Number(res.headers.get('content-length')) || 0);
+      }
       const reader = res.body.getReader();
-      const chunks = [];
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -77,9 +144,10 @@ async function fetchBytes(url, byterange, signal, onBytes) {
       }
       return concat(chunks);
     } catch (e) {
-      if (received && onBytes) onBytes(-received, 0, 0);
-      if (signal.aborted || attempt >= RETRIES) throw e;
-      await sleep(500 * attempt);
+      if (control.cancelled) throw e;
+      if (control.paused) continue; // wait at the gate, then continue from `received`
+      if (++failures >= RETRIES) throw e;
+      await sleep(500 * failures);
     }
   }
 }
@@ -157,12 +225,12 @@ function hexToBytes(hex) {
   return new Uint8Array(hex.match(/../g).map((b) => parseInt(b, 16)));
 }
 
-async function decrypt(segment, data, keys, signal) {
+async function decrypt(segment, data, keys, control) {
   if (!segment.key) return data;
   if (!keys.has(segment.key.uri)) {
     keys.set(
       segment.key.uri,
-      fetchBytes(segment.key.uri, null, signal).then((raw) =>
+      fetchBytes(segment.key.uri, null, control).then((raw) =>
         crypto.subtle.importKey('raw', raw, 'AES-CBC', false, ['decrypt'])
       )
     );
@@ -173,53 +241,95 @@ async function decrypt(segment, data, keys, signal) {
   return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-CBC', iv }, key, data));
 }
 
-// Downloads every track, reporting combined progress; returns one byte array per track.
-async function downloadTracks(tracks, signal, report) {
-  const progress = tracks.map(() => 0);
+// Combined numbers for the popup. A single file's size is known from its
+// headers; a segmented track's size is estimated from the segments done so far.
+function trackStats(tracks, state) {
   let bytes = 0;
+  let total = 0;
+  let estimated = false;
+  let unknown = false;
+  const fractions = tracks.map((track, t) => {
+    const s = state[t];
+    bytes += s.bytes;
+    if (track.single) {
+      if (s.total) total += s.total;
+      else unknown = true;
+      return s.total ? s.bytes / s.total : 0;
+    }
+    if (s.done) {
+      total += (s.segmentBytes / s.done) * track.segments.length;
+      estimated ||= s.done < track.segments.length;
+    } else unknown = true;
+    return s.done / track.segments.length;
+  });
+  // Until every track's size can be worked out, go by how much of each is done.
+  if (unknown) return { bytes, total: 0, totalEstimated: true, progress: fractions.reduce((a, b) => a + b, 0) / tracks.length };
+  total = Math.max(total, bytes);
+  return { bytes, total, totalEstimated: estimated, progress: total ? bytes / total : 0 };
+}
+
+// Downloads every track, reporting combined progress; returns one byte array per track.
+async function downloadTracks(tracks, control, report) {
+  const state = tracks.map(() => ({ bytes: 0, total: 0, done: 0, segmentBytes: 0 }));
+  const meter = speedMeter();
   let lastReport = 0;
+  let wasPaused = false;
   const update = (force) => {
     const now = Date.now();
     if (!force && now - lastReport < 500) return;
     lastReport = now;
-    report({ progress: progress.reduce((a, b) => a + b, 0) / tracks.length, bytes });
+    const stats = trackStats(tracks, state);
+    const speed = meter.update(stats.bytes, now);
+    report({ ...stats, speed, eta: etaSeconds(stats.bytes, stats.total, speed) });
   };
+  // Pause/resume reports come from a timer: while paused nothing else is happening.
+  const ticker = setInterval(() => {
+    if (control.paused === wasPaused) return;
+    wasPaused = control.paused;
+    meter.reset();
+    report(wasPaused ? { status: 'paused', speed: 0, eta: 0 } : { status: 'downloading' });
+  }, 250);
 
-  return Promise.all(
-    tracks.map(async (track, t) => {
-      const keys = new Map();
-      const head = track.init ? [await fetchBytes(track.init.url, track.init.byterange, signal)] : [];
-
-      if (track.single) {
-        const seg = track.segments[0];
-        const data = await fetchBytes(seg.url, seg.byterange, signal, (delta, received, total) => {
-          bytes += delta;
-          if (total) progress[t] = received / total;
+  try {
+    return await Promise.all(
+      tracks.map(async (track, t) => {
+        const s = state[t];
+        const keys = new Map();
+        const head = track.init ? [await fetchBytes(track.init.url, track.init.byterange, control)] : [];
+        const onBytes = (delta, _received, total) => {
+          s.bytes += delta;
+          if (track.single) s.total = total;
           update();
-        });
-        progress[t] = 1;
-        update(true);
-        return concat([...head, data]);
-      }
+        };
 
-      const parts = new Array(track.segments.length);
-      let next = 0;
-      let done = 0;
-      const worker = async () => {
-        while (next < track.segments.length) {
-          const i = next++;
-          const seg = track.segments[i];
-          parts[i] = await decrypt(seg, await fetchBytes(seg.url, seg.byterange, signal), keys, signal);
-          bytes += parts[i].byteLength;
-          progress[t] = ++done / track.segments.length;
-          update();
+        if (track.single) {
+          const seg = track.segments[0];
+          const data = await fetchBytes(seg.url, seg.byterange, control, onBytes);
+          update(true);
+          return concat([...head, data]);
         }
-      };
-      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, track.segments.length) }, worker));
-      update(true);
-      return concat([...head, ...parts]);
-    })
-  );
+
+        const parts = new Array(track.segments.length);
+        let next = 0;
+        const worker = async () => {
+          while (next < track.segments.length) {
+            const i = next++;
+            const seg = track.segments[i];
+            const data = await fetchBytes(seg.url, seg.byterange, control, onBytes);
+            parts[i] = await decrypt(seg, data, keys, control);
+            s.done++;
+            s.segmentBytes += data.byteLength;
+            update();
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(CONCURRENCY, track.segments.length) }, worker));
+        update(true);
+        return concat([...head, ...parts]);
+      })
+    );
+  } finally {
+    clearInterval(ticker);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -289,14 +399,13 @@ async function assemble(outputs, report) {
 // ---------------------------------------------------------------------------
 
 async function runJob({ id, tracks: sources, referer }) {
-  const controller = new AbortController();
-  const { signal } = controller;
-  controllers.set(id, controller);
+  const control = new JobControl();
+  controls.set(id, control);
   const report = (patch) => toBackground('job-update', { jobId: id, patch }).catch(() => {});
 
   try {
     await setReferer(sources.map((s) => s.url), referer);
-    const tracks = await resolveTracks(sources, signal);
+    const tracks = await resolveTracks(sources, control.cancelSignal);
     const urls = tracks.flatMap((t) => [
       ...t.segments.map((s) => s.url),
       ...t.segments.filter((s) => s.key).map((s) => s.key.uri),
@@ -305,17 +414,17 @@ async function runJob({ id, tracks: sources, referer }) {
     await setReferer(urls, referer);
 
     report({ status: 'downloading', progress: 0, live: tracks.some((t) => t.live) });
-    const outputs = await downloadTracks(tracks, signal, report);
-    if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+    const outputs = await downloadTracks(tracks, control, report);
+    if (control.cancelled) throw new DOMException('Aborted', 'AbortError');
 
     const { blob, ext } = await assemble(outputs, report);
     const blobUrl = URL.createObjectURL(blob);
     blobUrls.set(id, blobUrl);
     await toBackground('job-ready', { jobId: id, blobUrl, ext });
   } catch (e) {
-    if (signal.aborted) report({ status: 'cancelled' });
+    if (control.cancelled) report({ status: 'cancelled' });
     else report({ status: 'error', error: e.message });
   } finally {
-    controllers.delete(id);
+    controls.delete(id);
   }
 }

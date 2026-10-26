@@ -1,4 +1,4 @@
-import { buildEntries, formatBytes, formatDuration } from '../lib/common.js';
+import { buildEntries, formatBytes, formatDuration, formatSpeed } from '../lib/common.js';
 import { youtubeVideoUrl, COMPANION_MISSING } from '../lib/youtube.js';
 
 const $items = document.getElementById('items');
@@ -14,6 +14,7 @@ const ACTIVE = new Set(['starting', 'downloading', 'merging', 'saving']);
 const STATUS_TEXT = {
   starting: 'Starting…',
   downloading: 'Downloading',
+  paused: 'Paused',
   merging: 'Merging video and audio…',
   saving: 'Saving file…',
   done: 'Done',
@@ -144,11 +145,7 @@ function entryCard(entry) {
     const res = await chrome.runtime.sendMessage({ type: 'download', tabId: tab.id, ...choice() });
     status.hidden = false;
     status.className = res?.ok ? 'note ok' : 'note';
-    status.textContent = res?.ok
-      ? res.direct
-        ? 'Download started.'
-        : 'Download started — progress is shown below.'
-      : res?.error || 'Download failed.';
+    status.textContent = res?.ok ? 'Download started — progress is shown below.' : res?.error || 'Download failed.';
     download.disabled = false;
   });
 
@@ -176,35 +173,76 @@ function entryCard(entry) {
   );
 }
 
+// "120.4 MB of 300.0 MB" ("~" when the total is an estimate), or just the bytes so far.
+function sizeText(job) {
+  const done = formatBytes(job.bytes);
+  if (!done) return '';
+  return job.total > 0 && job.status !== 'done' ? `${done} of ${job.totalEstimated ? '~' : ''}${formatBytes(job.total)}` : done;
+}
+
+// 16×16 icon paths (stroke-based, drawn in the button's text colour).
+const ICONS = {
+  pause: 'M5.5 3.5v9M10.5 3.5v9',
+  resume: 'M5 3.2v9.6L12.5 8z',
+  cancel: 'M4 4l8 8M12 4l-8 8',
+  folder: 'M2 4.5h4l1.5 1.5H14V12.5H2z',
+};
+
+function iconButton(name, label, onClick) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', ICONS[name]);
+  svg.append(path);
+  const button = el('button', { className: `icon ${name}`, title: label, ariaLabel: label }, svg);
+  button.addEventListener('click', () => {
+    button.disabled = true;
+    onClick();
+  });
+  return button;
+}
+
+function jobButton(name, label, type, job) {
+  return iconButton(name, label, () => chrome.runtime.sendMessage({ type, jobId: job.id }));
+}
+
 function jobCard(job) {
-  const active = ACTIVE.has(job.status);
+  const paused = job.status === 'paused';
+  const running = ACTIVE.has(job.status);
   const pct = Math.round((job.progress || 0) * 100);
-  const detail = [
+  const status = [
     STATUS_TEXT[job.status] || job.status,
-    job.status === 'downloading' ? `${pct}%` : '',
+    job.status === 'downloading' || paused ? `${pct}%` : '',
     job.status === 'done' && job.source === 'youtube' ? 'Saved to Downloads' : '',
-    formatBytes(job.bytes),
+  ].filter(Boolean);
+  const stats = [
+    sizeText(job),
+    job.status === 'downloading' ? formatSpeed(job.speed) : '',
+    job.status === 'downloading' && job.eta > 0 ? `${formatDuration(job.eta)} left` : '',
   ].filter(Boolean);
 
-  if (active && job.speed) detail.push(job.speed);
-  if (active && job.eta) detail.push(`${job.eta} left`);
-
-  let action = null;
-  if (active) {
-    action = el('button', { textContent: 'Cancel' });
-    action.addEventListener('click', () => chrome.runtime.sendMessage({ type: 'cancel-job', jobId: job.id }));
-  } else if (job.status === 'done' && job.file) {
-    action = el('button', { textContent: 'Show in folder' });
-    action.addEventListener('click', () => chrome.runtime.sendMessage({ type: 'reveal', path: job.file }));
+  const buttons = [];
+  if (job.status === 'downloading') buttons.push(jobButton('pause', 'Pause', 'pause-job', job));
+  if (paused) buttons.push(jobButton('resume', 'Resume', 'resume-job', job));
+  if (running || paused) buttons.push(jobButton('cancel', 'Cancel', 'cancel-job', job));
+  if (job.status === 'done' && job.file) {
+    buttons.push(iconButton('folder', 'Show in folder', () => chrome.runtime.sendMessage({ type: 'reveal', path: job.file })));
   }
 
   return el(
     'li',
     { className: 'card' },
-    el('div', { className: 'card-top' }, el('span', { className: 'name', textContent: job.title, title: job.title }), action),
-    el('div', { className: 'meta', textContent: detail.join(' · ') }),
+    el(
+      'div',
+      { className: 'card-top' },
+      el('span', { className: 'name', textContent: job.title, title: job.title }),
+      buttons.length ? el('div', { className: 'icon-buttons' }, ...buttons) : null
+    ),
+    el('div', { className: 'meta', textContent: status.join(' · ') }),
+    stats.length ? el('div', { className: 'meta stats', textContent: stats.join(' · ') }) : null,
     job.error ? el('div', { className: 'note', textContent: job.error }) : null,
-    active ? el('div', { className: 'progress' }, el('div', { style: `width:${pct}%` })) : null
+    running || paused ? el('div', { className: `progress${paused ? ' paused' : ''}` }, el('div', { style: `width:${pct}%` })) : null
   );
 }
 

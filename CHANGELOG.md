@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.0
+
+- Download cards show speed, time left and "downloaded of total size"
+- Pause and resume downloads; resuming continues from where it stopped
+- Round icon buttons for pause, resume, cancel and "Show in folder"
+- Direct file downloads now appear in the menu too
+- YouTube: cancelling removes the partial files
+- YouTube: fixed downloads failing with "Error when communicating with the native messaging host" after pausing or cancelling
+- Companion installer can update the app while the browser is using it
+- New Miracle logo and icons
+
 ## 0.3.0
 
 - YouTube downloads through the companion app: quality picker, audio only (M4A), progress, cancel, "Show in folder"

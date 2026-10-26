@@ -26,6 +26,10 @@ $FfmpegUrl = 'https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/f
 New-Item -ItemType Directory -Force $InstallDir | Out-Null
 
 Write-Host 'Building companion app...'
+# A running copy can't be overwritten, but it can be renamed; it's removed on the next install.
+$old = "$Exe.old"
+if (Test-Path $old) { Remove-Item -Force $old -ErrorAction SilentlyContinue }
+if ((Test-Path $Exe) -and -not (Test-Path $old)) { Move-Item -Force $Exe $old }
 $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (-not (Test-Path $csc)) { $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe' }
 if (-not (Test-Path $csc)) { throw 'The .NET Framework 4 C# compiler was not found.' }

@@ -19,10 +19,12 @@ using System.Web.Script.Serialization;
 
 static class Host
 {
-    const string Version = "0.3.0";
+    const string Version = "1.0.0";
 
     static readonly object WriteLock = new object();
     static readonly Dictionary<string, Process> Jobs = new Dictionary<string, Process>();
+    // Jobs being stopped by "pause" rather than "cancel": their partial files are kept.
+    static readonly HashSet<string> Pausing = new HashSet<string>();
     static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
     static readonly string Dir = AppDomain.CurrentDomain.BaseDirectory;
     static readonly string YtDlp = Path.Combine(Dir, "yt-dlp.exe");
@@ -113,8 +115,12 @@ static class Host
                     Download(msg);
                     Reply(reqId, Obj());
                     break;
+                case "pause":
+                    Pause(Str(msg, "jobId"));
+                    Reply(reqId, Obj());
+                    break;
                 case "cancel":
-                    Cancel(Str(msg, "jobId"));
+                    Cancel(Str(msg, "jobId"), msg.ContainsKey("partials") ? msg["partials"] as System.Collections.ArrayList : null);
                     Reply(reqId, Obj());
                     break;
                 case "reveal":
@@ -170,7 +176,19 @@ static class Host
             "heights", list);
     }
 
-    static readonly Regex ProgressLine = new Regex(@"^AVD\|([^|]*)\|\s*([\d.]+)%\|([^|]*)\|(.*)$");
+    // AVD|format|downloaded|total|total estimate|speed|eta ("NA" when yt-dlp doesn't know).
+    static readonly Regex ProgressLine = new Regex(@"^AVD\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|(.*)$");
+    static readonly Regex Destination = new Regex(@"^\[download\] Destination: (.+)$");
+    // Seen when a paused download resumes after one of its parts already finished.
+    static readonly Regex AlreadyDone = new Regex(@"^\[download\] (.+) has already been downloaded$");
+
+    static double Num(string s)
+    {
+        double v;
+        // NaN/Infinity would serialize to invalid JSON and break the message channel.
+        return double.TryParse(s.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v)
+            && !double.IsNaN(v) && !double.IsInfinity(v) ? v : 0;
+    }
 
     static void Download(Dictionary<string, object> msg)
     {
@@ -181,11 +199,14 @@ static class Host
         int.TryParse(Str(msg, "height"), out height);
 
         var args = new List<string> {
-            "--no-playlist", "--no-mtime", "--newline", "--progress", "--encoding", "utf-8",
+            // --print implies --quiet, which hides the "Destination:" lines naming the partial files.
+            "--no-playlist", "--no-mtime", "--newline", "--progress", "--no-quiet", "--encoding", "utf-8",
             "--ffmpeg-location", Dir,
             "-P", DownloadsFolder(),
             "-o", "%(title).150B [%(id)s].%(ext)s",
-            "--progress-template", "download:AVD|%(info.format_id)s|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s",
+            "--progress-template", "download:AVD|%(info.format_id)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s",
+            // Size of everything that will be downloaded (video + audio), for "x of y".
+            "--print", "before_dl:AVDSIZE|%(filesize,filesize_approx)s",
             "--print", "after_move:AVDFILE|%(filepath)s",
         };
         if (audioOnly)
@@ -203,7 +224,11 @@ static class Host
         Process p = Start(args.ToArray());
         lock (Jobs) Jobs[jobId] = p;
 
+        // Video and audio download one after another (each is a "phase").
         var phases = new List<string>();
+        var phaseBytes = new Dictionary<string, double>();
+        var partials = new List<string>();
+        double expected = 0;
         string file = null;
         var errors = new StringBuilder();
         p.ErrorDataReceived += (s, e) =>
@@ -218,46 +243,134 @@ static class Host
                 file = e.Data.Substring(8);
                 return;
             }
+            if (e.Data.StartsWith("AVDSIZE|"))
+            {
+                expected = Num(e.Data.Substring(8));
+                return;
+            }
+            Match d = Destination.Match(e.Data);
+            if (d.Success)
+            {
+                lock (partials) partials.Add(d.Groups[1].Value.Trim());
+                return;
+            }
+            Match a = AlreadyDone.Match(e.Data);
+            if (a.Success)
+            {
+                string path = a.Groups[1].Value.Trim();
+                lock (partials) partials.Add(path);
+                if (!phases.Contains(path)) phases.Add(path);
+                try { phaseBytes[path] = new FileInfo(path).Length; } catch { phaseBytes[path] = 0; }
+                return;
+            }
             Match m = ProgressLine.Match(e.Data);
             if (!m.Success) return;
             string format = m.Groups[1].Value;
             if (!phases.Contains(format)) phases.Add(format);
-            // Video and audio download one after another; split the bar between them.
-            int total = audioOnly ? 1 : Math.Max(2, phases.Count);
-            double pct = double.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture) / 100.0;
-            double progress = (phases.IndexOf(format) + pct) / total;
-            bool merging = !audioOnly && phases.Count >= 2 && pct >= 1.0 && phases.IndexOf(format) == phases.Count - 1;
-            Send(Obj("type", "progress", "jobId", jobId, "progress", Math.Min(progress, 1.0),
-                "speed", m.Groups[3].Value.Trim(), "eta", m.Groups[4].Value.Trim(),
+            double done = Num(m.Groups[2].Value);
+            double size = Num(m.Groups[3].Value);
+            if (size <= 0) size = Num(m.Groups[4].Value);
+            phaseBytes[format] = done;
+
+            double bytes = 0, finishedSize = 0;
+            foreach (string f in phases)
+            {
+                bytes += phaseBytes[f];
+                if (f != format) finishedSize += phaseBytes[f];
+            }
+            // Prefer yt-dlp's total for the whole download; otherwise what we know so far.
+            bool useExpected = expected > bytes;
+            double total = useExpected ? expected : finishedSize + size;
+            double progress = total > 0 ? Math.Min(bytes / total, 1.0) : 0;
+            bool merging = !audioOnly && phases.Count >= 2 && size > 0 && done >= size;
+            Send(Obj("type", "progress", "jobId", jobId, "progress", progress,
+                "bytes", bytes, "total", total, "totalEstimated", !useExpected && Num(m.Groups[3].Value) <= 0,
+                "speed", Num(m.Groups[5].Value), "eta", Num(m.Groups[6].Value),
                 "status", merging ? "merging" : "downloading"));
         };
         p.BeginOutputReadLine();
         p.BeginErrorReadLine();
         p.WaitForExit();
 
-        bool cancelled;
+        bool stopped, paused;
         lock (Jobs)
         {
-            cancelled = !Jobs.ContainsKey(jobId);
+            stopped = !Jobs.ContainsKey(jobId);
+            paused = Pausing.Remove(jobId);
             Jobs.Remove(jobId);
         }
-        if (cancelled)
+        if (paused)
+        {
+            // yt-dlp continues from the .part files when the same download runs again.
+            Send(Obj("type", "paused", "jobId", jobId, "partials", partials));
+        }
+        else if (stopped)
+        {
+            DeletePartials(partials);
             Send(Obj("type", "cancelled", "jobId", jobId));
+        }
         else if (p.ExitCode == 0 && file != null)
             Send(Obj("type", "done", "jobId", jobId, "file", file));
         else
             Send(Obj("type", "error", "jobId", jobId, "error", errors.Length > 0 ? errors.ToString().Trim() : "yt-dlp exited with code " + p.ExitCode));
     }
 
-    static void Cancel(string jobId)
+    static void Pause(string jobId)
     {
         Process p;
         lock (Jobs)
         {
             if (!Jobs.TryGetValue(jobId, out p)) return;
             Jobs.Remove(jobId);
+            Pausing.Add(jobId);
         }
         Kill(p);
+    }
+
+    // A running job is stopped (it cleans up when its process exits); a paused one
+    // has no process, so the extension passes the partial files it was told about.
+    static void Cancel(string jobId, System.Collections.ArrayList partials)
+    {
+        Process p;
+        lock (Jobs)
+        {
+            if (!Jobs.TryGetValue(jobId, out p))
+            {
+                if (partials != null)
+                {
+                    var paths = new List<string>();
+                    foreach (object o in partials) paths.Add(Convert.ToString(o));
+                    DeletePartials(paths);
+                }
+                return;
+            }
+            Jobs.Remove(jobId);
+        }
+        Kill(p);
+    }
+
+    // Removes what an unfinished download left behind. Only touches files in the
+    // Downloads folder: "*.part" / "*.ytdl" leftovers and per-format intermediates
+    // ("Title [id].f137.mp4"), never a finished video.
+    static readonly Regex Intermediate = new Regex(@"\.f\d+[\w-]*\.\w+$");
+
+    static void DeletePartials(List<string> destinations)
+    {
+        string downloads = Path.GetFullPath(DownloadsFolder()).TrimEnd('\\') + "\\";
+        foreach (string dest in destinations)
+        {
+            try
+            {
+                string full = Path.GetFullPath(dest);
+                if (!full.StartsWith(downloads, StringComparison.OrdinalIgnoreCase)) continue;
+                var targets = new List<string> { full + ".part", full + ".ytdl" };
+                if (Intermediate.IsMatch(full)) targets.Add(full);
+                // Streamed (HLS/DASH) formats also leave "<file>.part-Frag<n>.part" pieces.
+                targets.AddRange(Directory.GetFiles(Path.GetDirectoryName(full), Path.GetFileName(full) + ".part-Frag*"));
+                foreach (string t in targets) if (File.Exists(t)) File.Delete(t);
+            }
+            catch { }
+        }
     }
 
     static void Reveal(string path)
@@ -310,8 +423,19 @@ static class Host
     {
         try
         {
-            // yt-dlp spawns ffmpeg; take the whole tree down.
-            Process.Start(new ProcessStartInfo("taskkill", "/T /F /PID " + p.Id) { CreateNoWindow = true, UseShellExecute = false, RedirectStandardInput = true }).WaitForExit();
+            // yt-dlp spawns ffmpeg; take the whole tree down. taskkill's output must
+            // be captured: our stdout is the browser's message channel.
+            var kill = Process.Start(new ProcessStartInfo("taskkill", "/T /F /PID " + p.Id)
+            {
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            });
+            kill.StandardOutput.ReadToEnd();
+            kill.StandardError.ReadToEnd();
+            kill.WaitForExit();
         }
         catch { }
     }

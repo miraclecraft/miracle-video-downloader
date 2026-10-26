@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Miracle - Video Downloader",
-  "version": "0.3.0",
+  "version": "1.0.0",
   "description": "Detects videos on web pages and downloads them: MP4/WebM files, HLS and DASH streams, Facebook, Instagram and YouTube (with the companion app).",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4OZhgNepXXvVfqVAmteHLIpVy+EWY8grvaiGCsMGycViRHIPry34NHjKCEylwcewBMwRCLpw7Whjem5XkWhi2nV9rWW927WPYMkITli1POBR6ZIgb84XbgispTZOrWNnLQtlSNuQy1XW6ILeCBzdBoXk+eFWWaiODsnxokKKQUq7hHyP7MyZOQJJC9GqsxvxODKRbzHRdjv7sA3AsJgpzSTJegMliLoqKCCGxrSwsQ8z9nShpAZF45EQ5SKi0QgVjKzlO16SWQ3Coi+9/rj5iyvW25uVKtyXVQuoW+msZ/bozWZ+xNPMpM4gv0g3ZTaxJKLwaM2WQyUAF5tsJXkn2wIDAQAB",
   "content_security_policy": {
