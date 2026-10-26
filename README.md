@@ -15,11 +15,11 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Edge-0078D7?style=flat-square" alt="Microsoft Edge" />
-  <img src="https://img.shields.io/badge/Chrome-4285F4?style=flat-square" alt="Google Chrome" />
-  <img src="https://img.shields.io/badge/Brave-FB542B?style=flat-square" alt="Brave" />
-  <img src="https://img.shields.io/badge/Opera-FF1B2D?style=flat-square" alt="Opera" />
-  <img src="https://img.shields.io/badge/Vivaldi-EF3939?style=flat-square" alt="Vivaldi" />
+  <picture><img src="https://img.shields.io/badge/Edge-0078D7?style=flat-square" alt="Microsoft Edge" /></picture>
+  <picture><img src="https://img.shields.io/badge/Chrome-4285F4?style=flat-square" alt="Google Chrome" /></picture>
+  <picture><img src="https://img.shields.io/badge/Brave-FB542B?style=flat-square" alt="Brave" /></picture>
+  <picture><img src="https://img.shields.io/badge/Opera-FF1B2D?style=flat-square" alt="Opera" /></picture>
+  <picture><img src="https://img.shields.io/badge/Vivaldi-EF3939?style=flat-square" alt="Vivaldi" /></picture>
 </p>
 
 <p align="center">
@@ -45,10 +45,10 @@
 ### Supported sites
 
 <p>
-  <img src="https://img.shields.io/badge/YouTube-FF0000?style=flat-square&logo=youtube&logoColor=white" alt="YouTube" />
-  <img src="https://img.shields.io/badge/Facebook-0866FF?style=flat-square&logo=facebook&logoColor=white" alt="Facebook" />
-  <img src="https://img.shields.io/badge/Instagram-E4405F?style=flat-square&logo=instagram&logoColor=white" alt="Instagram" />
-  <img src="https://img.shields.io/badge/most%20other%20video%20sites-555555?style=flat-square" alt="Most other video sites" />
+  <picture><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat-square&logo=youtube&logoColor=white" alt="YouTube" /></picture>
+  <picture><img src="https://img.shields.io/badge/Facebook-0866FF?style=flat-square&logo=facebook&logoColor=white" alt="Facebook" /></picture>
+  <picture><img src="https://img.shields.io/badge/Instagram-E4405F?style=flat-square&logo=instagram&logoColor=white" alt="Instagram" /></picture>
+  <picture><img src="https://img.shields.io/badge/most%20other%20video%20sites-555555?style=flat-square" alt="Most other video sites" /></picture>
 </p>
 
 > [!NOTE]
@@ -72,8 +72,8 @@ Click the green **Code** button at the top of this page → **Download ZIP**, th
 
 <table>
 <tr>
-<th><img src="https://img.shields.io/badge/Microsoft%20Edge-0078D7?style=flat-square" alt="Microsoft Edge" /></th>
-<th><img src="https://img.shields.io/badge/Google%20Chrome-4285F4?style=flat-square" alt="Google Chrome" /></th>
+<th><picture><img src="https://img.shields.io/badge/Microsoft%20Edge-0078D7?style=flat-square" alt="Microsoft Edge" /></picture></th>
+<th><picture><img src="https://img.shields.io/badge/Google%20Chrome-4285F4?style=flat-square" alt="Google Chrome" /></picture></th>
 </tr>
 <tr>
 <td>
@@ -115,7 +115,7 @@ It downloads two well-known free tools, [yt-dlp](https://github.com/yt-dlp/yt-dl
 2. Click the **Miracle** icon. The number on it shows how many videos were found
 3. Pick a quality and click **Download**
 
-Files are saved to your **Downloads** folder. Streams and videos whose audio and video need joining show a progress bar while they're prepared.
+Files are saved to your **Downloads** folder. While a download runs, the menu shows its speed, time left and how much is done. Use the pause, resume and cancel buttons next to it at any time.
 
 On **YouTube** the menu shows the video's thumbnail and title. Pick a quality or **Audio only**, click **Download**, then **Show in folder** when it's done.
 
