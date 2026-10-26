@@ -78,8 +78,8 @@ Change the versions in `package.json` first if you want a newer release.
 
 ## Releasing
 
-1. Bump `version` in `manifest.json` (and `package.json`), and add an entry to `CHANGELOG.md`.
-2. Commit, tag (`git tag v0.3.0`) and push the tag.
+1. Bump `version` in `manifest.json`, `package.json`, `package-lock.json` and `Version` in `companion/host.cs`, update the version badge at the top of `README.md`, and add an entry to `CHANGELOG.md`.
+2. Commit, tag (`git tag v1.1.0`) and push the tag.
 3. On GitHub, create a release from the tag. GitHub attaches the source ZIP automatically, which is what users download.
 
 ## Limitations
